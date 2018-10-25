@@ -112,6 +112,8 @@ function parse_reg_rule()
 			flags = flags "\n\t\t\tNL80211_RRF_NO_IR | "
 		} else if (flagarray[arg] == "AUTO-BW") {
 			flags = flags "\n\t\t\tNL80211_RRF_AUTO_BW | "
+		} else if (flagarray[arg] == "OCB-ONLY") {
+			flags = flags "\n\t\t\tNL80211_RRF_OCB_ONLY | "
 		}
 
 	}
