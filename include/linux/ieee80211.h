@@ -629,6 +629,43 @@ static inline int ieee80211_is_first_frag(__le16 seq_ctrl)
 	return (seq_ctrl & cpu_to_le16(IEEE80211_SCTL_FRAG)) == 0;
 }
 
+/**
+ * ieee80211_is_ocb - check if the frame is 802.11p compatible
+ * @fc: frame control bytes in little-endian byteorder
+ */
+/* We accept:   MGMT: TSF, action
+                 *              CTL: ~{PSPOLL,CFEND,CFENDACK}
+                 *              DATA: data, null, QoS data, QoS null 
+                 */
+static inline bool ieee80211_is_ocb(__le16 fc) {
+        if(ieee80211_is_data(fc)) {
+                if(!ieee80211_is_data_present(fc) &&
+                   !ieee80211_is_nullfunc(fc) &&
+                   !ieee80211_is_data_qos(fc) &&
+                   !ieee80211_is_qos_nullfunc(fc))
+                        return false;
+        }
+        else if(ieee80211_is_mgmt(fc)) {
+                if(!ieee80211_is_action(fc))
+                        return false;
+        }
+        else if(ieee80211_is_ctl(fc)) {
+                if(ieee80211_is_pspoll(fc) ||
+                   ieee80211_is_cfend(fc) ||
+                   ieee80211_is_cfendack(fc))
+                        return false;
+        }
+        else {
+                /* we don't support other frame types yet */
+                /* TODO: implement timing advertisement frame per 802.11p */
+                //return false; /* who did that??? */
+                return true;
+        }
+
+        return true;
+}
+
+
 struct ieee80211s_hdr {
 	u8 flags;
 	u8 ttl;

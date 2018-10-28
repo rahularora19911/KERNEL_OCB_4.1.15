@@ -577,6 +577,8 @@ ieee80211_tx_h_select_key(struct ieee80211_tx_data *tx)
 
 	if (unlikely(info->flags & IEEE80211_TX_INTFL_DONT_ENCRYPT))
 		tx->key = NULL;
+	else if(tx->sdata->vif.type == NL80211_IFTYPE_OCB)
+		tx->key = NULL; // added for 802.11p
 	else if (tx->sta &&
 		 (key = rcu_dereference(tx->sta->ptk[tx->sta->ptk_idx])))
 		tx->key = key;
@@ -998,6 +1000,10 @@ ieee80211_tx_h_encrypt(struct ieee80211_tx_data *tx)
 {
 	if (!tx->key)
 		return TX_CONTINUE;
+	if(tx->sdata->vif.type == NL80211_IFTYPE_OCB) {
+		/* no encryption done in 802.11p */
+		return TX_CONTINUE;
+	}
 
 	switch (tx->key->conf.cipher) {
 	case WLAN_CIPHER_SUITE_WEP40:
@@ -1203,6 +1209,20 @@ ieee80211_tx_prepare(struct ieee80211_sub_if_data *sdata,
 		    skb->len + FCS_LEN <= local->hw.wiphy->frag_threshold ||
 		    info->flags & IEEE80211_TX_CTL_AMPDU)
 			info->flags |= IEEE80211_TX_CTL_DONTFRAG;
+	}
+	
+	/* just added this */
+	if ((sdata->vif.type == NL80211_IFTYPE_OCB) && (!tx->sta) &&
+	    (tx->flags & IEEE80211_TX_UNICAST)) {
+		printk("%s:%s Unicast rx no sta clause\n",__FILE__,__FUNCTION__);
+		ieee80211_ocb_rx_no_sta(sdata, NULL, hdr->addr1, 0);
+	}
+	/* for 802.11p - can only specific frame types */
+	if(sdata->vif.type == NL80211_IFTYPE_OCB) {
+		if(!ieee80211_is_ocb(hdr->frame_control)) {
+			printk("%s:%s dropping frame for OCB mode\n",__FILE__,__FUNCTION__);
+			return TX_DROP;
+		}
 	}
 
 	if (!tx->sta)
@@ -1457,12 +1477,16 @@ static int invoke_tx_handlers(struct ieee80211_tx_data *tx)
 		if (res != TX_CONTINUE)	\
 			goto txh_done;	\
 	} while (0)
+	
+  	/* 802.11p doesn't require these functions */
+	if(tx->local->hw.wiphy->dot11OCBActivated == 0) {
+		CALL_TXH(ieee80211_tx_h_dynamic_ps);
+		CALL_TXH(ieee80211_tx_h_check_assoc);
+		CALL_TXH(ieee80211_tx_h_ps_buf);
+		CALL_TXH(ieee80211_tx_h_check_control_port_protocol);
+		CALL_TXH(ieee80211_tx_h_select_key);
+	}
 
-	CALL_TXH(ieee80211_tx_h_dynamic_ps);
-	CALL_TXH(ieee80211_tx_h_check_assoc);
-	CALL_TXH(ieee80211_tx_h_ps_buf);
-	CALL_TXH(ieee80211_tx_h_check_control_port_protocol);
-	CALL_TXH(ieee80211_tx_h_select_key);
 	if (!(tx->local->hw.flags & IEEE80211_HW_HAS_RATE_CONTROL))
 		CALL_TXH(ieee80211_tx_h_rate_ctrl);
 
@@ -1622,7 +1646,7 @@ void ieee80211_xmit(struct ieee80211_sub_if_data *sdata,
 	int headroom;
 	bool may_encrypt;
 
-	may_encrypt = !(info->flags & IEEE80211_TX_INTFL_DONT_ENCRYPT);
+	may_encrypt = !(info->flags & IEEE80211_TX_INTFL_DONT_ENCRYPT) & !(local->hw.wiphy->dot11OCBActivated);
 
 	headroom = local->tx_headroom;
 	if (may_encrypt)
@@ -2009,13 +2033,14 @@ static struct sk_buff *ieee80211_build_hdr(struct ieee80211_sub_if_data *sdata,
 	enum ieee80211_band band;
 	int ret;
 
-	if (IS_ERR(sta))
-		sta = NULL;
-
 	/* convert Ethernet header to proper 802.11 header (based on
 	 * operation mode) */
 	ethertype = (skb->data[12] << 8) | skb->data[13];
 	fc = cpu_to_le16(IEEE80211_FTYPE_DATA | IEEE80211_STYPE_DATA);
+
+	printk("%s:%s b4 hdr config \n",__FILE__,__FUNCTION__);
+	static const u8 bssid_wildcard[ETH_ALEN] __aligned(2)
+		= { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 	switch (sdata->vif.type) {
 	case NL80211_IFTYPE_AP_VLAN:
@@ -2176,18 +2201,39 @@ static struct sk_buff *ieee80211_build_hdr(struct ieee80211_sub_if_data *sdata,
 		}
 		band = chanctx_conf->def.chan->band;
 		break;
-	case NL80211_IFTYPE_OCB:
+	//case NL80211_IFTYPE_OCB:
 		/* DA SA BSSID */
+	//	printk("%s:%s configuring ocb hdr \n",__FILE__,__FUNCTION__);
+	//	multicast = true;
+	//	memcpy(hdr.addr1, skb->data, ETH_ALEN);
+	//	memcpy(hdr.addr2, skb->data + ETH_ALEN, ETH_ALEN);
+	//	memcpy(hdr.addr3, bssid_wildcard, ETH_ALEN);		
+		//eth_broadcast_addr(hdr.addr3);
+	//	hdrlen = 24;
+	//	chanctx_conf = rcu_dereference(sdata->vif.chanctx_conf);
+	//	if (!chanctx_conf) {
+	//		ret = -ENOTCONN;
+	//		goto free;
+	//	}
+	//	band = chanctx_conf->def.chan->band;
+	//	break;
+	case NL80211_IFTYPE_OCB: /* TODO: is this working right? */
+		/* DA SA BSSID */
+		printk("%s:%s configuring ocb hdr \n",__FILE__,__FUNCTION__);
+		multicast = true;
 		memcpy(hdr.addr1, skb->data, ETH_ALEN);
 		memcpy(hdr.addr2, skb->data + ETH_ALEN, ETH_ALEN);
-		eth_broadcast_addr(hdr.addr3);
+		memcpy(hdr.addr3, bssid_wildcard, ETH_ALEN);		
 		hdrlen = 24;
+		/*printk("%s:%s trying rcu_deference pointer \n",__FILE__,__FUNCTION__);
 		chanctx_conf = rcu_dereference(sdata->vif.chanctx_conf);
+		printk("%s:%s success rcu_deference pointer \n",__FILE__,__FUNCTION__);
 		if (!chanctx_conf) {
 			ret = -ENOTCONN;
 			goto free;
-		}
-		band = chanctx_conf->def.chan->band;
+		}*/
+		//band = chanctx_conf->def.chan->band;
+		band = NL80211_BAND_5GHZ;// local->hw.conf.chandef.chan->band;
 		break;
 	case NL80211_IFTYPE_ADHOC:
 		/* DA SA BSSID */
@@ -2208,6 +2254,7 @@ static struct sk_buff *ieee80211_build_hdr(struct ieee80211_sub_if_data *sdata,
 	}
 
 	multicast = is_multicast_ether_addr(hdr.addr1);
+	printk("%s:%s after hdr config \n",__FILE__,__FUNCTION__);
 
 	/* sta is always NULL for mesh */
 	if (sta) {
@@ -2216,6 +2263,17 @@ static struct sk_buff *ieee80211_build_hdr(struct ieee80211_sub_if_data *sdata,
 	} else if (ieee80211_vif_is_mesh(&sdata->vif)) {
 		/* For mesh, the use of the QoS header is mandatory */
 		wme_sta = true;
+	} 
+
+	if(sdata->vif.type == NL80211_IFTYPE_OCB) {
+		/* making OCB authorized to tx/rx by default - necessary for 802.11p ?*/
+	//	if(sta) {
+		//	set_sta_flag(sta,WLAN_STA_AUTHORIZED);
+ 		set_sta_flag(sta,WLAN_STA_OCB);
+ 		multicast = is_multicast_ether_addr(hdr.addr3);
+			//}
+		/* setting OCB for 802.11p */
+//wme_sta = true;
 	}
 
 	/* receiver does QoS (which also means we do) use it */
@@ -2363,6 +2421,13 @@ static struct sk_buff *ieee80211_build_hdr(struct ieee80211_sub_if_data *sdata,
 
 	nh_pos += hdrlen;
 	h_pos += hdrlen;
+	// flags to bypass state machine
+	if (local->hw.wiphy->dot11OCBActivated ) {
+		printk("%s:%s setting OCB flags to bypass state machine \n",__FILE__,__FUNCTION__);
+		info_flags |= IEEE80211_TX_INTFL_DONT_ENCRYPT;
+		info_flags |= IEEE80211_TX_CTL_DONTFRAG;
+		info_flags |= IEEE80211_TX_CTL_NO_ACK;
+	}
 
 	/* Update skb pointers to various headers since this modified frame
 	 * is going to go through Linux networking code that may potentially
@@ -2820,6 +2885,11 @@ __ieee80211_beacon_get(struct ieee80211_hw *hw,
 
 	if (!ieee80211_sdata_running(sdata) || !chanctx_conf)
 		goto out;
+	if(sdata->vif.type == NL80211_IFTYPE_OCB) {
+		/* No probing with 802.11p */
+		printk("%s:%s no beacon with OCB\n",__FILE__,__FUNCTION__);
+		return NULL;
+	}
 
 	if (offs)
 		memset(offs, 0, sizeof(*offs));
@@ -3021,6 +3091,12 @@ struct sk_buff *ieee80211_proberesp_get(struct ieee80211_hw *hw,
 	struct ieee80211_hdr *hdr;
 	struct ieee80211_sub_if_data *sdata = vif_to_sdata(vif);
 
+	if(sdata->vif.type == NL80211_IFTYPE_OCB) {
+		/* No probing with 802.11p */
+		printk("%s:%s no probing with OCB\n",__FILE__,__FUNCTION__);
+		return NULL;
+	}
+
 	if (sdata->vif.type != NL80211_IFTYPE_AP)
 		return NULL;
 
@@ -3137,6 +3213,12 @@ struct sk_buff *ieee80211_probereq_get(struct ieee80211_hw *hw,
 			    ie_ssid_len + tailroom);
 	if (!skb)
 		return NULL;
+	/* TODO: is this needed? */
+	if(local->hw.wiphy->dot11OCBActivated == 1) {
+		/* No probing with 802.11p */
+		printk("%s:%s no probing with OCB\n",__FILE__,__FUNCTION__);
+		return NULL;
+	}
 
 	skb_reserve(skb, local->hw.extra_tx_headroom);
 

@@ -243,7 +243,22 @@ void ieee80211_set_qos_hdr(struct ieee80211_sub_if_data *sdata,
 		return;
 
 	p = ieee80211_get_qos_ctl(hdr);
-	tid = skb->priority & IEEE80211_QOS_CTL_TAG1D_MASK;
+	/* 802.11p - TID subfield must always csp to TC (traffic category) */
+ 	/* BK = 0
+! 	 * BE = 2
+! 	 * VI = 5
+! 	 * VO = 6
+ 	 */
+ 	//ac = sdata->vif.txq->ac;
+ 	if(sdata->vif.type == NL80211_IFTYPE_OCB) {
+ 		/* do 802.11p stuff - make TID subfield csp to AC */
+ 		tid = sdata->vif.txq->ac & IEEE80211_QOS_CTL_TID_MASK;
+ 		/* tid = sdata->vif->txq.ac & IEEE80211_QOS_CTL_TID_MASK; */
+ 	}
+ 	else {
+ 		tid = skb->priority & IEEE80211_QOS_CTL_TAG1D_MASK;
+ 	}
+	//tid = skb->priority & IEEE80211_QOS_CTL_TAG1D_MASK;
 
 	/* preserve EOSP bit */
 	ack_policy = *p & IEEE80211_QOS_CTL_EOSP;

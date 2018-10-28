@@ -62,6 +62,9 @@ u8 *ieee80211_get_bssid(struct ieee80211_hdr *hdr, size_t len,
 
 		if (ieee80211_has_a4(fc))
 			return NULL;
+		if( type == NL80211_IFTYPE_OCB )
+			return hdr->addr3;
+
 		if (ieee80211_has_tods(fc))
 			return hdr->addr1;
 		if (ieee80211_has_fromds(fc))
@@ -82,6 +85,8 @@ u8 *ieee80211_get_bssid(struct ieee80211_hdr *hdr, size_t len,
 
 		if (ieee80211_is_back_req(fc)) {
 			switch (type) {
+			case NL80211_IFTYPE_OCB:
+				return hdr->addr3;
 			case NL80211_IFTYPE_STATION:
 				return hdr->addr2;
 			case NL80211_IFTYPE_AP:
@@ -91,6 +96,8 @@ u8 *ieee80211_get_bssid(struct ieee80211_hdr *hdr, size_t len,
 				break; /* fall through to the return */
 			}
 		}
+	if( type == NL80211_IFTYPE_OCB )
+			return hdr->addr3;
 	}
 
 	return NULL;
@@ -1156,6 +1163,11 @@ void ieee80211_set_wmm_default(struct ieee80211_sub_if_data *sdata,
 	int ac;
 	bool use_11b, enable_qos;
 	bool is_ocb; /* Use another EDCA parameters if dot11OCBActivated=true */
+	is_ocb = (sdata->vif.type == NL80211_IFTYPE_OCB);
+	
+	if(is_ocb) {
+		printk("%s:%s ocb EDCA parameters being set\n",__FILE__,__FUNCTION__);
+	}
 	int aCWmin, aCWmax;
 
 	if (!local->ops->conf_tx)
@@ -1180,7 +1192,7 @@ void ieee80211_set_wmm_default(struct ieee80211_sub_if_data *sdata,
 	 */
 	enable_qos = (sdata->vif.type != NL80211_IFTYPE_STATION);
 
-	is_ocb = (sdata->vif.type == NL80211_IFTYPE_OCB);
+	//is_ocb = (sdata->vif.type == NL80211_IFTYPE_OCB);
 
 	/* Set defaults according to 802.11-2007 Table 7-37 */
 	aCWmax = 1023;

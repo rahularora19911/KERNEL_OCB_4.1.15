@@ -1978,6 +1978,10 @@ static int ieee80211_scan(struct wiphy *wiphy,
 	sdata = IEEE80211_WDEV_TO_SUB_IF(req->wdev);
 
 	switch (ieee80211_vif_type_p2p(&sdata->vif)) {
+	case NL80211_IFTYPE_OCB:
+		/* OCB mode doesn't support scanning? */
+		printk("%s:%s OCB mode doesn't support scanning\n",__FILE__,__FUNCTION__);
+		return -EOPNOTSUPP;
 	case NL80211_IFTYPE_STATION:
 	case NL80211_IFTYPE_ADHOC:
 	case NL80211_IFTYPE_MESH_POINT:
@@ -2039,30 +2043,65 @@ ieee80211_sched_scan_stop(struct wiphy *wiphy, struct net_device *dev)
 static int ieee80211_auth(struct wiphy *wiphy, struct net_device *dev,
 			  struct cfg80211_auth_request *req)
 {
+	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+	/* No authentication in OCB mode */
+	if((sdata->local->hw.wiphy->dot11OCBActivated == 1)) {
+		printk("%s:%s OCB mode doesn't support authentication\n",__FILE__,__FUNCTION__);
+		return -EOPNOTSUPP;
+	}
+
 	return ieee80211_mgd_auth(IEEE80211_DEV_TO_SUB_IF(dev), req);
 }
 
 static int ieee80211_assoc(struct wiphy *wiphy, struct net_device *dev,
 			   struct cfg80211_assoc_request *req)
 {
+	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+	/* No authentication in OCB mode */
+	if((sdata->local->hw.wiphy->dot11OCBActivated == 1)) {
+		printk("%s:%s OCB mode doesn't support association\n",__FILE__,__FUNCTION__);
+		return -EOPNOTSUPP;
+	}
+
 	return ieee80211_mgd_assoc(IEEE80211_DEV_TO_SUB_IF(dev), req);
 }
 
 static int ieee80211_deauth(struct wiphy *wiphy, struct net_device *dev,
 			    struct cfg80211_deauth_request *req)
 {
+	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+	/* No authentication in OCB mode */
+	if((sdata->local->hw.wiphy->dot11OCBActivated == 1)) {
+		printk("%s:%s OCB mode doesn't support deauthentication\n",__FILE__,__FUNCTION__);
+		return -EOPNOTSUPP;
+	}
+
 	return ieee80211_mgd_deauth(IEEE80211_DEV_TO_SUB_IF(dev), req);
 }
 
 static int ieee80211_disassoc(struct wiphy *wiphy, struct net_device *dev,
 			      struct cfg80211_disassoc_request *req)
 {
+	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+	/* No authentication in OCB mode */
+	if((sdata->local->hw.wiphy->dot11OCBActivated == 1)) {
+		printk("%s:%s OCB mode doesn't support disassociation\n",__FILE__,__FUNCTION__);
+		return -EOPNOTSUPP;
+	}
+
 	return ieee80211_mgd_disassoc(IEEE80211_DEV_TO_SUB_IF(dev), req);
 }
 
 static int ieee80211_join_ibss(struct wiphy *wiphy, struct net_device *dev,
 			       struct cfg80211_ibss_params *params)
 {
+	struct ieee80211_sub_if_data *sdata = IEEE80211_DEV_TO_SUB_IF(dev);
+	/* No authentication in OCB mode */
+	if((sdata->local->hw.wiphy->dot11OCBActivated == 1)) {
+		printk("%s:%s 802.11p might not support IBSS\n",__FILE__,__FUNCTION__);
+		//return -EOPNOTSUPP;
+	}
+
 	return ieee80211_ibss_join(IEEE80211_DEV_TO_SUB_IF(dev), params);
 }
 
@@ -3564,9 +3603,10 @@ static int ieee80211_cfg_get_channel(struct wiphy *wiphy,
 	if (chanctx_conf) {
 		*chandef = sdata->vif.bss_conf.chandef;
 		ret = 0;
-	} else if (local->open_count > 0 &&
+	} else if ((local->open_count > 0 &&
 		   local->open_count == local->monitors &&
-		   sdata->vif.type == NL80211_IFTYPE_MONITOR) {
+		   sdata->vif.type == NL80211_IFTYPE_MONITOR) ||
+		   sdata->vif.type == NL80211_IFTYPE_OCB) {
 		if (local->use_chanctx)
 			*chandef = local->monitor_chandef;
 		else

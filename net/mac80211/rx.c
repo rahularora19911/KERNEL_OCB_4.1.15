@@ -167,6 +167,12 @@ ieee80211_add_rx_radiotap_header(struct ieee80211_local *local,
 	int mpdulen, chain;
 	unsigned long chains = status->chains;
 	struct ieee80211_vendor_radiotap rtap = {};
+	
+	/* debug for 802.11p */
+	/* TODO want to filter radiotap header special for OCB? */
+	if(local->hw.wiphy->dot11OCBActivated == 1) {
+		printk("%s:%s doing channel_flag stuff for ocb\n",__FILE__,__FUNCTION__);
+	}
 
 	if (status->flag & RX_FLAG_RADIOTAP_VENDOR_DATA) {
 		rtap = *(struct ieee80211_vendor_radiotap *)skb->data;
@@ -457,7 +463,7 @@ ieee80211_rx_monitor(struct ieee80211_local *local, struct sk_buff *origskb,
 		return NULL;
 	}
 
-	if (!local->monitors) {
+	if (!local->monitors || local->hw.wiphy->dot11OCBActivated) {
 		if (should_drop_frame(origskb, present_fcs_len,
 				      rtap_vendor_space)) {
 			dev_kfree_skb(origskb);
@@ -988,7 +994,7 @@ static void ieee80211_rx_reorder_ampdu(struct ieee80211_rx_data *rx,
 	u8 tid, ack_policy;
 
 	if (!ieee80211_is_data_qos(hdr->frame_control) ||
-	    is_multicast_ether_addr(hdr->addr1))
+	    is_multicast_ether_addr(hdr->addr1)) 
 		goto dont_reorder;
 
 	/*
@@ -1922,6 +1928,11 @@ static int ieee80211_drop_unencrypted(struct ieee80211_rx_data *rx, __le16 fc)
 	 */
 	if (status->flag & RX_FLAG_DECRYPTED)
 		return 0;
+	
+	/* Pass through unencrypted frames if OCB is activated */
+	if(rx->local->hw.wiphy->dot11OCBActivated == 1) {
+		return -EOPNOTSUPP;
+	}
 
 	/* Drop unencrypted frames if key is set. */
 	if (unlikely(!ieee80211_has_protected(fc) &&
@@ -1944,6 +1955,10 @@ static int ieee80211_drop_unencrypted_mgmt(struct ieee80211_rx_data *rx)
 	 */
 	if (status->flag & RX_FLAG_DECRYPTED)
 		return 0;
+	
+	/* Pass through unencrypted frames if OCB is activated */
+	if(rx->local->hw.wiphy->dot11OCBActivated == 1)
+		return -EOPNOTSUPP;
 
 	if (rx->sta && test_sta_flag(rx->sta, WLAN_STA_MFP)) {
 		if (unlikely(!ieee80211_has_protected(fc) &&
@@ -2380,9 +2395,12 @@ ieee80211_rx_h_data(struct ieee80211_rx_data *rx)
 	err = __ieee80211_data_to_8023(rx, &port_control);
 	if (unlikely(err))
 		return RX_DROP_UNUSABLE;
-
-	if (!ieee80211_frame_allowed(rx, fc))
-		return RX_DROP_MONITOR;
+	
+	/* No need to check for authorizations in 802.11p */
+	if(local->hw.wiphy->dot11OCBActivated == 0) {
+		if (!ieee80211_frame_allowed(rx, fc))
+			return RX_DROP_MONITOR;
+	}	
 
 	/* directly handle TDLS channel switch requests/responses */
 	if (unlikely(((struct ethhdr *)rx->skb->data)->h_proto ==
@@ -3297,33 +3315,74 @@ static bool prepare_for_handlers(struct ieee80211_rx_data *rx,
 						 BIT(rate_idx));
 		}
 		break;
-	case NL80211_IFTYPE_OCB:
+
+//	case NL80211_IFTYPE_OCB:
+//		if (!bssid)
+//			return false;
+//		if (ieee80211_is_beacon(hdr->frame_control)) {
+//			return false;
+//		} else if (!is_broadcast_ether_addr(bssid)) {
+//			ocb_dbg(sdata, "BSSID mismatch in OCB mode!\n");
+//			return false;
+//		} else if (!multicast &&
+//			   !ether_addr_equal(sdata->dev->dev_addr,
+//					     hdr->addr1)) {
+//			/* if we are in promisc mode we also accept
+//			 * packets not destined for us
+//			 */
+//			if (!(sdata->dev->flags & IFF_PROMISC))
+//				return false;
+//			rx->flags &= ~IEEE80211_RX_RA_MATCH;
+//		} else if (!rx->sta) {
+//			int rate_idx;
+//			if (status->flag & RX_FLAG_HT)
+//				rate_idx = 0; /* TODO: HT rates */
+//			else
+//				rate_idx = status->rate_idx;
+//			ieee80211_ocb_rx_no_sta(sdata, bssid, hdr->addr2,
+//						BIT(rate_idx));
+//		}
+//		break;
+	case NL80211_IFTYPE_OCB: /* TODO: fix this */
+		/* We accept: 	MGMT: TSF, action
+		 * 		CTL: ~{PSPOLL,CFEND,CFENDACK}
+		 *		DATA: data, null, QoS data, QoS null 
+		 */
 		if (!bssid)
 			return false;
-		if (ieee80211_is_beacon(hdr->frame_control)) {
+/*		if (!is_broadcast_ether_addr(bssid)) {
+			if( ieee80211_is_data(hdr->frame_control) || 
+		    	ieee80211_is_mgmt(hdr->frame_control))
+				ocb_dbg(sdata, "MGMT and DATA frames must use wildcard!\n");
+			else
+				ocb_dbg(sdata, "BSSID mismatch in OCB mode!\n");
 			return false;
-		} else if (!is_broadcast_ether_addr(bssid)) {
-			ocb_dbg(sdata, "BSSID mismatch in OCB mode!\n");
+		}*/
+		if (!multicast &&
+		    !ether_addr_equal(sdata->vif.addr, hdr->addr3))	{
+		    printk("%s:%s Group addr have wildcard BSSID\n",__FILE__,__FUNCTION__);
 			return false;
-		} else if (!multicast &&
-			   !ether_addr_equal(sdata->dev->dev_addr,
-					     hdr->addr1)) {
-			/* if we are in promisc mode we also accept
-			 * packets not destined for us
-			 */
-			if (!(sdata->dev->flags & IFF_PROMISC))
-				return false;
-			rx->flags &= ~IEEE80211_RX_RA_MATCH;
-		} else if (!rx->sta) {
+		}
+		if (!multicast &&
+		    !ether_addr_equal(sdata->dev->dev_addr, hdr->addr1)) {
+			printk("%s:%s bot mc and not addr1 addr \n",__FILE__,__FUNCTION__);
+			return false;
+		}
+		/* added for 802.11p */
+		if(!ieee80211_is_ocb(hdr->frame_control)) {
+			printk("%s:%s wrong frame type for OCB\n",__FILE__,__FUNCTION__);
+			//return false;
+		}
+		if (!rx->sta) {
 			int rate_idx;
-			if (status->flag & RX_FLAG_HT)
+			if (status->flag != RX_FLAG_HT)
 				rate_idx = 0; /* TODO: HT rates */
 			else
 				rate_idx = status->rate_idx;
 			ieee80211_ocb_rx_no_sta(sdata, bssid, hdr->addr2,
 						BIT(rate_idx));
 		}
-		break;
+		return true;
 	case NL80211_IFTYPE_MESH_POINT:
 		if (!multicast &&
 		    !ether_addr_equal(sdata->vif.addr, hdr->addr1)) {
@@ -3639,6 +3698,9 @@ void ieee80211_rx(struct ieee80211_hw *hw, struct sk_buff *skb)
 	 */
 	skb = ieee80211_rx_monitor(local, skb, rate);
 	if (!skb) {
+		if(local->hw.wiphy->dot11OCBActivated == 1) {
+			printk("%s:%s original skb returned as null\n",__FILE__,__FUNCTION__);
+		}
 		rcu_read_unlock();
 		return;
 	}

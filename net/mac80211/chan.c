@@ -1529,7 +1529,7 @@ int ieee80211_vif_use_channel(struct ieee80211_sub_if_data *sdata,
 	WARN_ON(sdata->dev && netif_carrier_ok(sdata->dev));
 
 	mutex_lock(&local->chanctx_mtx);
-
+	printk("%s:%s before chandef \n",__FILE__,__FUNCTION__);
 	ret = cfg80211_chandef_dfs_required(local->hw.wiphy,
 					    chandef,
 					    sdata->wdev.iftype);
@@ -1539,12 +1539,12 @@ int ieee80211_vif_use_channel(struct ieee80211_sub_if_data *sdata,
 		radar_detect_width = BIT(chandef->width);
 
 	sdata->radar_required = ret;
-
+	printk("%s:%s checling combinations \n",__FILE__,__FUNCTION__);
 	ret = ieee80211_check_combinations(sdata, chandef, mode,
 					   radar_detect_width);
 	if (ret < 0)
 		goto out;
-
+	printk("%s:%s releasing channel \n",__FILE__,__FUNCTION__);
 	__ieee80211_vif_release_channel(sdata);
 
 	ctx = ieee80211_find_chanctx(local, chandef, mode);
@@ -1554,9 +1554,9 @@ int ieee80211_vif_use_channel(struct ieee80211_sub_if_data *sdata,
 		ret = PTR_ERR(ctx);
 		goto out;
 	}
-
+	printk("%s:%s update chandef \n",__FILE__,__FUNCTION__);
 	ieee80211_vif_update_chandef(sdata, chandef);
-
+	printk("%s:%s assign vif \n",__FILE__,__FUNCTION__);
 	ret = ieee80211_assign_vif_chanctx(sdata, ctx);
 	if (ret) {
 		/* if assign fails refcount stays the same */

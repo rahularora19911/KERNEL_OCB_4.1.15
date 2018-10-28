@@ -3163,6 +3163,8 @@ struct wiphy {
 	u32 rts_threshold;
 	u8 coverage_class;
 
+	/* required by 802.11p */
+        bool dot11OCBActivated;
 	char fw_version[ETHTOOL_FWVERS_LEN];
 	u32 hw_version;
 

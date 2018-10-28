@@ -611,8 +611,11 @@ struct ieee80211_hw *ieee80211_alloc_hw_nm(size_t priv_data_len,
 
 	INIT_LIST_HEAD(&local->chanctx_list);
 	mutex_init(&local->chanctx_mtx);
-
-	INIT_DELAYED_WORK(&local->scan_work, ieee80211_scan_work);
+	/* Scanning not supported in 802.11p */
+	/* TODO check if this is called before or after dot11OCBActiveate=1 */
+	if(local->hw.wiphy->dot11OCBActivated == 0) {
+		INIT_DELAYED_WORK(&local->scan_work, ieee80211_scan_work);
+	}
 
 	INIT_WORK(&local->restart_work, ieee80211_restart_work);
 
@@ -622,15 +625,20 @@ struct ieee80211_hw *ieee80211_alloc_hw_nm(size_t priv_data_len,
 	INIT_WORK(&local->reconfig_filter, ieee80211_reconfig_filter);
 	local->smps_mode = IEEE80211_SMPS_OFF;
 
-	INIT_WORK(&local->dynamic_ps_enable_work,
-		  ieee80211_dynamic_ps_enable_work);
-	INIT_WORK(&local->dynamic_ps_disable_work,
-		  ieee80211_dynamic_ps_disable_work);
-	setup_timer(&local->dynamic_ps_timer,
-		    ieee80211_dynamic_ps_timer, (unsigned long) local);
+	/* for 802.11p I don't think we need any of this 
+	 * dynamic power save
+	 */
+	if(local->hw.wiphy->dot11OCBActivated == 0) {
+		INIT_WORK(&local->dynamic_ps_enable_work,
+			  ieee80211_dynamic_ps_enable_work);
+		INIT_WORK(&local->dynamic_ps_disable_work,
+			  ieee80211_dynamic_ps_disable_work);
+		setup_timer(&local->dynamic_ps_timer,
+			    ieee80211_dynamic_ps_timer, (unsigned long) local);
 
-	INIT_WORK(&local->sched_scan_stopped_work,
-		  ieee80211_sched_scan_stopped_work);
+		INIT_WORK(&local->sched_scan_stopped_work,
+			  ieee80211_sched_scan_stopped_work);
+	}
 
 	spin_lock_init(&local->ack_status_lock);
 	idr_init(&local->ack_status_frames);
@@ -662,6 +670,11 @@ EXPORT_SYMBOL(ieee80211_alloc_hw_nm);
 
 static int ieee80211_init_cipher_suites(struct ieee80211_local *local)
 {
+	if(local->hw.wiphy->dot11OCBActivated == 1) {
+		/* we don't use encryption in 802.11p */
+		printk("%s:%s no ciphers necessary for 802.11p\n",__FILE__,__FUNCTION__);
+		return -EOPNOTSUPP; //0;
+	}
 	bool have_wep = !(IS_ERR(local->wep_tx_tfm) ||
 			  IS_ERR(local->wep_rx_tfm));
 	bool have_mfp = local->hw.flags & IEEE80211_HW_MFP_CAPABLE;
@@ -913,9 +926,12 @@ int ieee80211_register_hw(struct ieee80211_hw *hw)
 		c = &hw->wiphy->iface_combinations[i];
 
 		for (j = 0; j < c->n_limits; j++)
-			if ((c->limits[j].types & BIT(NL80211_IFTYPE_ADHOC)) &&
-			    c->limits[j].max > 1)
-				return -EINVAL;
+			if (( (c->limits[j].types & BIT(NL80211_IFTYPE_ADHOC)) ||
+				(c->limits[j].types & BIT(NL80211_IFTYPE_OCB))) &&
+			    	c->limits[j].max > 1) {
+				printk("%s:%s mac80211 doesn't support more than one IBSS interface right now\n",__FILE__,__FUNCTION__);
+				return -EOPNOTSUPP;
+		}
 	}
 
 	local->int_scan_req = kzalloc(sizeof(*local->int_scan_req) +

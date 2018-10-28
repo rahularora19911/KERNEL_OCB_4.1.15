@@ -110,7 +110,8 @@ static u32 __ieee80211_recalc_idle(struct ieee80211_local *local,
 
 	active = force_active ||
 		 !list_empty(&local->chanctx_list) ||
-		 local->monitors;
+		 local->monitors ||
+		 local->ocbs;
 
 	working = !local->ops->remain_on_channel &&
 		  !list_empty(&local->roc_list);
@@ -489,6 +490,7 @@ void ieee80211_del_virtual_monitor(struct ieee80211_local *local)
  */
 int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
 {
+	printk("%s:%s\n",__FILE__,__FUNCTION__);
 	struct ieee80211_sub_if_data *sdata = IEEE80211_WDEV_TO_SUB_IF(wdev);
 	struct net_device *dev = wdev->netdev;
 	struct ieee80211_local *local = sdata->local;
@@ -496,6 +498,7 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
 	u32 changed = 0;
 	int res;
 	u32 hw_reconf_flags = 0;
+	printk("%s:%s sdata->vif.type = %d \n",__FILE__,__FUNCTION__,sdata->vif.type);
 
 	switch (sdata->vif.type) {
 	case NL80211_IFTYPE_WDS:
@@ -539,8 +542,10 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
 	case NL80211_IFTYPE_ADHOC:
 	case NL80211_IFTYPE_P2P_DEVICE:
 	case NL80211_IFTYPE_OCB:
-		/* no special treatment */
-		break;
+		/* set dot11OCBActivated to true */
+		local->hw.wiphy->dot11OCBActivated = 1;	
+		printk("%s:%s setting OCB active flags\n",__FILE__,__FUNCTION__);
+		break;	
 	case NL80211_IFTYPE_UNSPECIFIED:
 	case NUM_NL80211_IFTYPES:
 	case NL80211_IFTYPE_P2P_CLIENT:
@@ -642,6 +647,41 @@ int ieee80211_do_open(struct wireless_dev *wdev, bool coming_up)
 
 		if (sdata->vif.type != NL80211_IFTYPE_P2P_DEVICE)
 			changed |= ieee80211_reset_erp_info(sdata);
+		/* is this needed? */
+		if (sdata->vif.type == NL80211_IFTYPE_OCB) {
+ 			printk("goto... local->ocbs++\n");
+			local->ocbs++;
+
+			/* Disable beacons */
+			sdata->vif.bss_conf.enable_beacon = false;
+			changed |= BSS_CHANGED_BEACON;
+
+			/*
+			 * Disable idle -- when chanctx will be used,
+			 * this will be unnecessary
+			 */
+			sdata->vif.bss_conf.idle = false;
+			changed |= BSS_CHANGED_IDLE;
+
+			/* Receive all data frames */
+			local->fif_other_bss++;
+			ieee80211_configure_filter(local);
+
+			mutex_lock(&local->mtx);
+			ieee80211_recalc_idle(local);
+			mutex_unlock(&local->mtx);
+
+			netif_carrier_on(dev);
+
+			if (netif_carrier_ok(dev))
+				printk("netif  carrier ok!\n");
+
+			if(local->hw.wiphy->dot11OCBActivated == 1)
+				printk("%s:%s OCB activation worked\n",__FILE__,__FUNCTION__);
+		
+			/* TODO: Should we add the flags to mark as auth/assoc/etc here? */
+		}
+	
 		ieee80211_bss_info_change_notify(sdata, changed);
 
 		switch (sdata->vif.type) {
@@ -765,8 +805,10 @@ static int ieee80211_open(struct net_device *dev)
 	int err;
 
 	/* fail early if user set an invalid address */
-	if (!is_valid_ether_addr(dev->dev_addr))
+	if (!is_valid_ether_addr(dev->dev_addr)) {
+		printk("%s:%s no valid ethernet addr \n",__FILE__,__FUNCTION__);
 		return -EADDRNOTAVAIL;
+	}
 
 	err = ieee80211_check_concurrent_iface(sdata, sdata->vif.type);
 	if (err)
@@ -805,6 +847,8 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 	case NL80211_IFTYPE_STATION:
 		ieee80211_mgd_stop(sdata);
 		break;
+	case NL80211_IFTYPE_OCB: /* i think this helps */
+		printk("%s:%s Breaking ocb ocb_stop \n",__FILE__,__FUNCTION__);
 	case NL80211_IFTYPE_ADHOC:
 		ieee80211_ibss_stop(sdata);
 		break;
@@ -941,6 +985,11 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 
 		ieee80211_adjust_monitor_flags(sdata, -1);
 		break;
+	case NL80211_IFTYPE_OCB:
+		local->ocbs--;
+		if (local->ocbs == 0) {
+			/* TODO Do some cleaning */
+		}
 	case NL80211_IFTYPE_P2P_DEVICE:
 		/* relies on synchronize_rcu() below */
 		RCU_INIT_POINTER(local->p2p_sdata, NULL);
@@ -1291,6 +1340,9 @@ static void ieee80211_iface_work(struct work_struct *work)
 				break;
 			ieee80211_mesh_rx_queued_mgmt(sdata, skb);
 			break;
+		case NL80211_IFTYPE_OCB:
+			printk("%s:%s OCB mode unexpected frame type\n",__FILE__,__FUNCTION__);
+			/* TODO: Configure OCB to accept Action and TSF type mgmt frames */
 		default:
 			WARN(1, "frame for unexpected interface type");
 			break;
@@ -1334,8 +1386,10 @@ static void ieee80211_recalc_smps_work(struct work_struct *work)
 static void ieee80211_setup_sdata(struct ieee80211_sub_if_data *sdata,
 				  enum nl80211_iftype type)
 {
-	static const u8 bssid_wildcard[ETH_ALEN] = {0xff, 0xff, 0xff,
-						    0xff, 0xff, 0xff};
+	//static const u8 bssid_wildcard[ETH_ALEN] __alligned(2)= {0xFF, 0xFF, 0xFF,
+	//					    0xFF, 0xFF, 0xFF};
+	static const u8 bssid_wildcard[ETH_ALEN] __aligned(2)
+                = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
 	/* clear type-dependent union */
 	memset(&sdata->u, 0, sizeof(sdata->u));

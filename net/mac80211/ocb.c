@@ -49,6 +49,8 @@ void ieee80211_ocb_rx_no_sta(struct ieee80211_sub_if_data *sdata,
 	enum nl80211_bss_scan_width scan_width;
 	struct sta_info *sta;
 	int band;
+	if (!ifocb->joined)
+		return;
 
 	/* XXX: Consider removing the least recently used entry and
 	 *      allow new one to be added.
@@ -64,10 +66,14 @@ void ieee80211_ocb_rx_no_sta(struct ieee80211_sub_if_data *sdata,
 	rcu_read_lock();
 	chanctx_conf = rcu_dereference(sdata->vif.chanctx_conf);
 	if (WARN_ON_ONCE(!chanctx_conf)) {
+		printk("%s:%s chanctx warn on once error\n",__FILE__,__FUNCTION__);
 		rcu_read_unlock();
 		return;
 	}
 	band = chanctx_conf->def.chan->band;
+	/* testing that annoying warn on once error */
+	printk("%s:%s band is: %d \n",__FILE__,__FUNCTION__,band);
+
 	scan_width = cfg80211_chandef_to_scan_width(&chanctx_conf->def);
 	rcu_read_unlock();
 
@@ -96,7 +102,7 @@ static struct sta_info *ieee80211_ocb_finish_sta(struct sta_info *sta)
 
 	memcpy(addr, sta->sta.addr, ETH_ALEN);
 
-	ocb_dbg(sdata, "Adding new IBSS station %pM (dev=%s)\n",
+	ocb_dbg(sdata, "Adding new OCB/IBSS station %pM (dev=%s)\n",
 		addr, sdata->name);
 
 	sta_info_move_state(sta, IEEE80211_STA_AUTH);
@@ -184,17 +190,20 @@ int ieee80211_ocb_join(struct ieee80211_sub_if_data *sdata,
 
 	if (ifocb->joined == true)
 		return -EINVAL;
-
+	local->hw.wiphy->dot11OCBActivated = 1;
 	sdata->flags |= IEEE80211_SDATA_OPERATING_GMODE;
 	sdata->smps_mode = IEEE80211_SMPS_OFF;
 	sdata->needed_rx_chains = sdata->local->rx_chains;
 
 	mutex_lock(&sdata->local->mtx);
+	/* is this the error ??????? */
 	err = ieee80211_vif_use_channel(sdata, &setup->chandef,
 					IEEE80211_CHANCTX_SHARED);
 	mutex_unlock(&sdata->local->mtx);
-	if (err)
+	if (err) {
+		printk("%s:%s ocb join error\n",__FILE__,__FUNCTION__);
 		return err;
+	}
 
 	ieee80211_bss_info_change_notify(sdata, changed);
 
@@ -215,6 +224,9 @@ int ieee80211_ocb_leave(struct ieee80211_sub_if_data *sdata)
 
 	ifocb->joined = false;
 	sta_info_flush(sdata);
+
+	/* added for 802.11p */
+	local->hw.wiphy->dot11OCBActivated = 0;
 
 	spin_lock_bh(&ifocb->incomplete_lock);
 	while (!list_empty(&ifocb->incomplete_stations)) {
