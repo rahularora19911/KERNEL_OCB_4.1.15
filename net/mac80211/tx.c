@@ -2257,19 +2257,19 @@ static struct sk_buff *ieee80211_build_hdr(struct ieee80211_sub_if_data *sdata,
 	printk("%s:%s after hdr config \n",__FILE__,__FUNCTION__);
 
 	/* sta is always NULL for mesh */
-	if (sta) {
-		authorized = test_sta_flag(sta, WLAN_STA_AUTHORIZED);
-		wme_sta = sta->sta.wme;
-	} else if (ieee80211_vif_is_mesh(&sdata->vif)) {
+//	if (sta) {
+//		authorized = test_sta_flag(sta, WLAN_STA_AUTHORIZED);
+//		wme_sta = sta->sta.wme;
+//	} else if (ieee80211_vif_is_mesh(&sdata->vif)) {
 		/* For mesh, the use of the QoS header is mandatory */
-		wme_sta = true;
-	} 
+//		wme_sta = true;
+//	} 
 
 	if(sdata->vif.type == NL80211_IFTYPE_OCB) {
 		/* making OCB authorized to tx/rx by default - necessary for 802.11p ?*/
 	//	if(sta) {
 		//	set_sta_flag(sta,WLAN_STA_AUTHORIZED);
- 		set_sta_flag(sta,WLAN_STA_OCB);
+ //		set_sta_flag(sta,WLAN_STA_OCB);
  		multicast = is_multicast_ether_addr(hdr.addr3);
 			//}
 		/* setting OCB for 802.11p */
