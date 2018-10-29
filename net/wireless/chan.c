@@ -23,6 +23,16 @@ void cfg80211_chandef_create(struct cfg80211_chan_def *chandef,
 	chandef->center_freq2 = 0;
 
 	switch (chan_type) {
+	case NL80211_CHAN_5MHZ:
+		/* should 5MHz be classified as 20_NOHT? */
+ 		chandef->width = NL80211_CHAN_WIDTH_5;
+ 		chandef->center_freq1 = chan->center_freq;
+ 		break;
+ 	case NL80211_CHAN_10MHZ:
+		/* should 10MHz be classified as 20_NOHT? */
+ 		chandef->width = NL80211_CHAN_WIDTH_10;
+ 		chandef->center_freq1 = chan->center_freq;
+ 		break;
 	case NL80211_CHAN_NO_HT:
 		chandef->width = NL80211_CHAN_WIDTH_20_NOHT;
 		chandef->center_freq1 = chan->center_freq;
@@ -337,6 +347,8 @@ int cfg80211_chandef_dfs_required(struct wiphy *wiphy,
 		return -EINVAL;
 
 	switch (iftype) {
+	case NL80211_IFTYPE_OCB:
+		printk("%s:%s iftype is ocb\n",__FILE__,__FUNCTION__);
 	case NL80211_IFTYPE_ADHOC:
 	case NL80211_IFTYPE_AP:
 	case NL80211_IFTYPE_P2P_GO:
@@ -366,7 +378,7 @@ int cfg80211_chandef_dfs_required(struct wiphy *wiphy,
 
 		break;
 	case NL80211_IFTYPE_STATION:
-	case NL80211_IFTYPE_OCB:
+	//case NL80211_IFTYPE_OCB:
 	case NL80211_IFTYPE_P2P_CLIENT:
 	case NL80211_IFTYPE_MONITOR:
 	case NL80211_IFTYPE_AP_VLAN:
@@ -615,6 +627,7 @@ bool cfg80211_chandef_usable(struct wiphy *wiphy,
 
 	switch (chandef->width) {
 	case NL80211_CHAN_WIDTH_5:
+		prohibited_flags |= IEEE80211_CHAN_NO_10MHZ;
 		width = 5;
 		break;
 	case NL80211_CHAN_WIDTH_10:
@@ -784,10 +797,15 @@ bool cfg80211_reg_can_beacon(struct wiphy *wiphy,
 			     struct cfg80211_chan_def *chandef,
 			     enum nl80211_iftype iftype)
 {
+	if(iftype == NL80211_IFTYPE_OCB) {
+		printk("%s:%s no beaconing allowed in 802.11p\n",__FILE__,__FUNCTION__);
+		return -EOPNOTSUPP;
+	}
 	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wiphy);
 	bool res;
 	u32 prohibited_flags = IEEE80211_CHAN_DISABLED |
-			       IEEE80211_CHAN_RADAR;
+			       IEEE80211_CHAN_RADAR |
+				IEEE80211_CHAN_OCB_ONLY;
 
 	trace_cfg80211_reg_can_beacon(wiphy, chandef, iftype);
 

@@ -586,7 +586,7 @@ static int nl80211_msg_put_channel(struct sk_buff *msg,
 	 * list to protect old user-space tools from breaking
 	 */
 	if (!large && chan->flags &
-	    (IEEE80211_CHAN_NO_10MHZ | IEEE80211_CHAN_NO_20MHZ))
+	    (IEEE80211_CHAN_NO_10MHZ | IEEE80211_CHAN_NO_20MHZ | IEEE80211_CHAN_OCB_ONLY))
 		return 0;
 
 	if (nla_put_u32(msg, NL80211_FREQUENCY_ATTR_FREQ,
@@ -892,6 +892,8 @@ static int nl80211_key_allowed(struct wireless_dev *wdev)
 		break;
 	case NL80211_IFTYPE_UNSPECIFIED:
 	case NL80211_IFTYPE_OCB:
+		/* no encryption in 802.11p */
+		return -EOPNOTSUPP;
 	case NL80211_IFTYPE_MONITOR:
 	case NL80211_IFTYPE_P2P_DEVICE:
 	case NL80211_IFTYPE_WDS:
@@ -1324,6 +1326,11 @@ static int nl80211_send_wiphy(struct cfg80211_registered_device *rdev,
 		if ((rdev->wiphy.flags & WIPHY_FLAG_TDLS_EXTERNAL_SETUP) &&
 		    nla_put_flag(msg, NL80211_ATTR_TDLS_EXTERNAL_SETUP))
 			goto nla_put_failure;
+		if((rdev->wiphy.flags & WIPHY_FLAG_SUPPORTS_5_10_MHZ) &&
+		    nla_put_flag(msg, WIPHY_FLAG_SUPPORTS_5_10_MHZ)) {
+			printk("%s:%s:%s error using 5 and 10MHz channels\n",__FILE__,__FUNCTION__,__LINE__);
+			goto nla_put_failure;
+		}
 		state->split_start++;
 		if (state->split)
 			break;
@@ -1486,6 +1493,7 @@ static int nl80211_send_wiphy(struct cfg80211_registered_device *rdev,
 		CMD(disassoc, DISASSOCIATE);
 		CMD(join_ibss, JOIN_IBSS);
 		CMD(join_mesh, JOIN_MESH);
+		CMD(join_ocb, JOIN_OCB);
 		CMD(set_pmksa, SET_PMKSA);
 		CMD(del_pmksa, DEL_PMKSA);
 		CMD(flush_pmksa, FLUSH_PMKSA);
@@ -1909,6 +1917,7 @@ static bool nl80211_can_set_dev_channel(struct wireless_dev *wdev)
 	 * operation to set the monitor channel if possible.
 	 */
 	return !wdev ||
+		wdev->iftype == NL80211_IFTYPE_OCB || 
 		wdev->iftype == NL80211_IFTYPE_AP ||
 		wdev->iftype == NL80211_IFTYPE_MESH_POINT ||
 		wdev->iftype == NL80211_IFTYPE_MONITOR ||
@@ -1942,6 +1951,10 @@ static int nl80211_parse_chandef(struct cfg80211_registered_device *rdev,
 				info->attrs[NL80211_ATTR_WIPHY_CHANNEL_TYPE]);
 
 		switch (chantype) {
+		case NL80211_CHAN_10MHZ:
+			printk("%s:%s:%d 10MHz channel\n",__FILE__,__FUNCTION__,__LINE__);
+		case NL80211_CHAN_5MHZ:
+			printk("%s:%s:%d 5MHz channel\n",__FILE__,__FUNCTION__,__LINE__);
 		case NL80211_CHAN_NO_HT:
 		case NL80211_CHAN_HT20:
 		case NL80211_CHAN_HT40PLUS:
@@ -1966,17 +1979,21 @@ static int nl80211_parse_chandef(struct cfg80211_registered_device *rdev,
 	}
 
 	if (!cfg80211_chandef_valid(chandef))
+		printk("%s:%s channel isn't valid OCB_debug \n",__FILE__,__FUNCTION__);
 		return -EINVAL;
 
 	if (!cfg80211_chandef_usable(&rdev->wiphy, chandef,
-				     IEEE80211_CHAN_DISABLED))
+				     IEEE80211_CHAN_DISABLED)) {
+		printk("%s:%s channel isn't usable OCB_debug \n",__FILE__,__FUNCTION__);
 		return -EINVAL;
+	}
 
 	if ((chandef->width == NL80211_CHAN_WIDTH_5 ||
 	     chandef->width == NL80211_CHAN_WIDTH_10) &&
-	    !(rdev->wiphy.flags & WIPHY_FLAG_SUPPORTS_5_10_MHZ))
-		return -EINVAL;
-
+	    !(rdev->wiphy.flags & WIPHY_FLAG_SUPPORTS_5_10_MHZ)) {
+		printk("%s:%s Doesn't support 5 or 10MHz channel in OCB \n",__FILE__,__FUNCTION__);
+		//return -EINVAL;
+	}
 	return 0;
 }
 
@@ -2341,6 +2358,10 @@ static int nl80211_send_chandef(struct sk_buff *msg,
 			chandef->chan->center_freq))
 		return -ENOBUFS;
 	switch (chandef->width) {
+	case NL80211_CHAN_WIDTH_5:
+		printk("%s:%s:%s 5MHz channel\n",__FILE__,__FUNCTION__,__LINE__);
+	case NL80211_CHAN_WIDTH_10:
+		printk("%s:%s:%s 10MHz channel\n",__FILE__,__FUNCTION__,__LINE__);
 	case NL80211_CHAN_WIDTH_20_NOHT:
 	case NL80211_CHAN_WIDTH_20:
 	case NL80211_CHAN_WIDTH_40:
@@ -7021,6 +7042,9 @@ static int nl80211_associate(struct sk_buff *skb, struct genl_info *info)
 	if (dev->ieee80211_ptr->iftype != NL80211_IFTYPE_STATION &&
 	    dev->ieee80211_ptr->iftype != NL80211_IFTYPE_P2P_CLIENT)
 		return -EOPNOTSUPP;
+	/* redundant for 802.11p  - association not supported */
+	if(dev->ieee80211_ptr->iftype == NL80211_IFTYPE_OCB)
+		return -EOPNOTSUPP;
 
 	bssid = nla_data(info->attrs[NL80211_ATTR_MAC]);
 
@@ -7124,6 +7148,10 @@ static int nl80211_deauthenticate(struct sk_buff *skb, struct genl_info *info)
 	if (dev->ieee80211_ptr->iftype != NL80211_IFTYPE_STATION &&
 	    dev->ieee80211_ptr->iftype != NL80211_IFTYPE_P2P_CLIENT)
 		return -EOPNOTSUPP;
+	
+	/* redundant for 802.11p - should be no auth/deauth*/
+	if(dev->ieee80211_ptr->iftype == NL80211_IFTYPE_OCB)
+		return -EOPNOTSUPP;
 
 	bssid = nla_data(info->attrs[NL80211_ATTR_MAC]);
 
@@ -7170,6 +7198,10 @@ static int nl80211_disassociate(struct sk_buff *skb, struct genl_info *info)
 
 	if (dev->ieee80211_ptr->iftype != NL80211_IFTYPE_STATION &&
 	    dev->ieee80211_ptr->iftype != NL80211_IFTYPE_P2P_CLIENT)
+		return -EOPNOTSUPP;
+
+	/* redundant for 802.11p - should be no assoc/disassoc */
+	if(dev->ieee80211_ptr->iftype == NL80211_IFTYPE_OCB)
 		return -EOPNOTSUPP;
 
 	bssid = nla_data(info->attrs[NL80211_ATTR_MAC]);
@@ -7249,10 +7281,11 @@ static int nl80211_join_ibss(struct sk_buff *skb, struct genl_info *info)
 			return -EINVAL;
 	}
 
-	if (!rdev->ops->join_ibss)
+	if (!rdev->ops->join_ibss && !rdev->ops->join_ocb)
 		return -EOPNOTSUPP;
 
-	if (dev->ieee80211_ptr->iftype != NL80211_IFTYPE_ADHOC)
+	if ((dev->ieee80211_ptr->iftype != NL80211_IFTYPE_ADHOC)
+		&& (dev->ieee80211_ptr->iftype != NL80211_IFTYPE_OCB))
 		return -EOPNOTSUPP;
 
 	wiphy = &rdev->wiphy;
@@ -7358,8 +7391,12 @@ static int nl80211_join_ibss(struct sk_buff *skb, struct genl_info *info)
 
 	ibss.userspace_handles_dfs =
 		nla_get_flag(info->attrs[NL80211_ATTR_HANDLE_DFS]);
+	
+	if(dev->ieee80211_ptr->iftype != NL80211_IFTYPE_OCB)
+		err = cfg80211_join_ibss(rdev, dev, &ibss, connkeys);
+	else
+		printk("%s:%s houston we got a problem with OCB\n",__FILE__,__FUNCTION__);
 
-	err = cfg80211_join_ibss(rdev, dev, &ibss, connkeys);
 	if (err)
 		kzfree(connkeys);
 	return err;
@@ -8294,6 +8331,7 @@ static int nl80211_register_mgmt(struct sk_buff *skb, struct genl_info *info)
 	case NL80211_IFTYPE_MESH_POINT:
 	case NL80211_IFTYPE_P2P_GO:
 	case NL80211_IFTYPE_P2P_DEVICE:
+	case NL80211_IFTYPE_OCB: /* Add OCB support for MGMT */
 		break;
 	default:
 		return -EOPNOTSUPP;
@@ -8334,6 +8372,7 @@ static int nl80211_tx_mgmt(struct sk_buff *skb, struct genl_info *info)
 			return -EINVAL;
 	case NL80211_IFTYPE_STATION:
 	case NL80211_IFTYPE_ADHOC:
+	case NL80211_IFTYPE_OCB:
 	case NL80211_IFTYPE_P2P_CLIENT:
 	case NL80211_IFTYPE_AP:
 	case NL80211_IFTYPE_AP_VLAN:
@@ -8638,11 +8677,21 @@ static int nl80211_join_ocb(struct sk_buff *skb, struct genl_info *info)
 	struct net_device *dev = info->user_ptr[1];
 	struct ocb_setup setup = {};
 	int err;
+	
+	memset(&setup, 0x0, sizeof(setup));
+
+	if (!info->attrs[NL80211_ATTR_WIPHY_FREQ]) {
+		printk("%s:%s EINVAL ret error \n",__FILE__,__FUNCTION__);
+		return -EINVAL;
+	}	
 
 	err = nl80211_parse_chandef(rdev, info, &setup.chandef);
-	if (err)
+	if (err) {
+		printk("error in OCB join %s:%s\n", __FILE__,__FUNCTION__);
 		return err;
-
+	}
+	
+	printk("%s:%s proceeding to cfg80211_join_ocb \n",__FILE__,__FUNCTION__);
 	return cfg80211_join_ocb(rdev, dev, &setup);
 }
 
