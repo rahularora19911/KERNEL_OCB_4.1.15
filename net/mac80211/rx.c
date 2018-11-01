@@ -3315,74 +3315,33 @@ static bool prepare_for_handlers(struct ieee80211_rx_data *rx,
 						 BIT(rate_idx));
 		}
 		break;
-
-//	case NL80211_IFTYPE_OCB:
-//		if (!bssid)
-//			return false;
-//		if (ieee80211_is_beacon(hdr->frame_control)) {
-//			return false;
-//		} else if (!is_broadcast_ether_addr(bssid)) {
-//			ocb_dbg(sdata, "BSSID mismatch in OCB mode!\n");
-//			return false;
-//		} else if (!multicast &&
-//			   !ether_addr_equal(sdata->dev->dev_addr,
-//					     hdr->addr1)) {
-//			/* if we are in promisc mode we also accept
-//			 * packets not destined for us
-//			 */
-//			if (!(sdata->dev->flags & IFF_PROMISC))
-//				return false;
-//			rx->flags &= ~IEEE80211_RX_RA_MATCH;
-//		} else if (!rx->sta) {
-//			int rate_idx;
-//			if (status->flag & RX_FLAG_HT)
-//				rate_idx = 0; /* TODO: HT rates */
-//			else
-//				rate_idx = status->rate_idx;
-//			ieee80211_ocb_rx_no_sta(sdata, bssid, hdr->addr2,
-//						BIT(rate_idx));
-//		}
-//		break;
-	case NL80211_IFTYPE_OCB: /* TODO: fix this */
-		/* We accept: 	MGMT: TSF, action
-		 * 		CTL: ~{PSPOLL,CFEND,CFENDACK}
-		 *		DATA: data, null, QoS data, QoS null 
-		 */
+	case NL80211_IFTYPE_OCB:
 		if (!bssid)
 			return false;
-/*		if (!is_broadcast_ether_addr(bssid)) {
-			if( ieee80211_is_data(hdr->frame_control) || 
-		    	ieee80211_is_mgmt(hdr->frame_control))
-				ocb_dbg(sdata, "MGMT and DATA frames must use wildcard!\n");
-			else
-				ocb_dbg(sdata, "BSSID mismatch in OCB mode!\n");
+		if (ieee80211_is_beacon(hdr->frame_control)) {
 			return false;
-		}*/
-		if (!multicast &&
-		    !ether_addr_equal(sdata->vif.addr, hdr->addr3))	{
-		    printk("%s:%s Group addr have wildcard BSSID\n",__FILE__,__FUNCTION__);
+		} else if (!is_broadcast_ether_addr(bssid)) {
+			ocb_dbg(sdata, "BSSID mismatch in OCB mode!\n");
 			return false;
-		}
-		if (!multicast &&
-		    !ether_addr_equal(sdata->dev->dev_addr, hdr->addr1)) {
-			printk("%s:%s bot mc and not addr1 addr \n",__FILE__,__FUNCTION__);
-			return false;
-		}
-		/* added for 802.11p */
-		if(!ieee80211_is_ocb(hdr->frame_control)) {
-			printk("%s:%s wrong frame type for OCB\n",__FILE__,__FUNCTION__);
-			//return false;
-		}
-		if (!rx->sta) {
+		} else if (!multicast &&
+			   !ether_addr_equal(sdata->dev->dev_addr,
+					     hdr->addr1)) {
+			/* if we are in promisc mode we also accept
+			 * packets not destined for us
+			 */
+			if (!(sdata->dev->flags & IFF_PROMISC))
+				return false;
+			rx->flags &= ~IEEE80211_RX_RA_MATCH;
+		} else if (!rx->sta) {
 			int rate_idx;
-			if (status->flag != RX_FLAG_HT)
+			if (status->flag & RX_FLAG_HT)
 				rate_idx = 0; /* TODO: HT rates */
 			else
 				rate_idx = status->rate_idx;
 			ieee80211_ocb_rx_no_sta(sdata, bssid, hdr->addr2,
 						BIT(rate_idx));
 		}
-		return true;
+		break;
 	case NL80211_IFTYPE_MESH_POINT:
 		if (!multicast &&
 		    !ether_addr_equal(sdata->vif.addr, hdr->addr1)) {
